@@ -1,9 +1,9 @@
 requests
 pandas
-streamlit==1.42.0
+streamlit>=1.42.0
 plotly
 scikit-learn
 numpy<2
 statsmodels
 anthropic
-altair<5.5
+altair<6
