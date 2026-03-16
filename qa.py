@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import streamlit as st
 from anthropic import Anthropic
 
 from analyze import format_pace
@@ -18,7 +19,16 @@ ENV_FILE = os.path.join(os.path.dirname(__file__), ".env")
 
 
 def _load_api_key():
-    """Laad Anthropic API key uit .env."""
+    """Laad Anthropic API key uit Streamlit secrets of .env."""
+    # Probeer eerst Streamlit secrets (voor Cloud deployment)
+    try:
+        key = st.secrets.get("ANTHROPIC_API_KEY")
+        if key:
+            return key
+    except Exception:
+        pass
+
+    # Fallback naar .env bestand (lokaal)
     if not os.path.exists(ENV_FILE):
         return None
     with open(ENV_FILE) as f:
