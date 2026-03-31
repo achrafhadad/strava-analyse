@@ -14,8 +14,27 @@ import requests
 TOKEN_FILE = os.path.join(os.path.dirname(__file__), "tokens.json")
 ENV_FILE = os.path.join(os.path.dirname(__file__), ".env")
 
+def _load_from_secrets():
+    """Probeer credentials te laden uit Streamlit secrets (voor Cloud)."""
+    try:
+        import streamlit as st
+        client_id = st.secrets.get("STRAVA_CLIENT_ID")
+        client_secret = st.secrets.get("STRAVA_CLIENT_SECRET")
+        if client_id and client_secret:
+            return str(client_id), str(client_secret)
+    except Exception:
+        pass
+    return None, None
+
+
 def load_env():
-    """Laad client_id en client_secret uit .env bestand."""
+    """Laad client_id en client_secret uit st.secrets of .env bestand."""
+    # Probeer eerst Streamlit secrets (voor Cloud deployment)
+    client_id, client_secret = _load_from_secrets()
+    if client_id and client_secret:
+        return client_id, client_secret
+
+    # Fallback naar .env bestand (lokaal)
     if not os.path.exists(ENV_FILE):
         raise FileNotFoundError(
             "Maak een .env bestand aan met STRAVA_CLIENT_ID en STRAVA_CLIENT_SECRET.\n"
@@ -100,29 +119,47 @@ def save_tokens(tokens):
         json.dump(data, f, indent=2)
 
 
+def _refresh_token(client_id, client_secret, refresh_token):
+    """Vernieuw een access token via de Strava API."""
+    response = requests.post("https://www.strava.com/oauth/token", data={
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "refresh_token": refresh_token,
+        "grant_type": "refresh_token",
+    })
+    response.raise_for_status()
+    return response.json()
+
+
 def get_access_token():
     """Haal een geldig access token op, vernieuw indien nodig."""
-    if not os.path.exists(TOKEN_FILE):
-        return authenticate()
+    # Probeer tokens.json (lokaal)
+    if os.path.exists(TOKEN_FILE):
+        with open(TOKEN_FILE) as f:
+            tokens = json.load(f)
 
-    with open(TOKEN_FILE) as f:
-        tokens = json.load(f)
+        if time.time() < tokens["expires_at"]:
+            return tokens["access_token"]
 
-    # Token verlopen? Vernieuw het.
-    if time.time() >= tokens["expires_at"]:
+        # Token verlopen, refresh
         client_id, client_secret = load_env()
-        response = requests.post("https://www.strava.com/oauth/token", data={
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "refresh_token": tokens["refresh_token"],
-            "grant_type": "refresh_token",
-        })
-        response.raise_for_status()
-        new_tokens = response.json()
+        new_tokens = _refresh_token(client_id, client_secret, tokens["refresh_token"])
         save_tokens(new_tokens)
         return new_tokens["access_token"]
 
-    return tokens["access_token"]
+    # Geen tokens.json — probeer st.secrets (Streamlit Cloud)
+    try:
+        import streamlit as st
+        refresh_token = st.secrets.get("STRAVA_REFRESH_TOKEN")
+        if refresh_token:
+            client_id, client_secret = load_env()
+            new_tokens = _refresh_token(client_id, client_secret, refresh_token)
+            return new_tokens["access_token"]
+    except Exception:
+        pass
+
+    # Laatste optie: volledige OAuth flow (alleen lokaal)
+    return authenticate()
 
 
 if __name__ == "__main__":

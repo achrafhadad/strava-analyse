@@ -101,6 +101,17 @@ def save_data(activities, df):
     print(f"  Bestanden: {DATA_DIR}/")
 
 
+def fetch_runs_live():
+    """Haal runs live op van Strava en geef een DataFrame terug."""
+    token = get_access_token()
+    activities = fetch_all_activities(token)
+    if not activities:
+        return pd.DataFrame()
+    df = process_activities(activities)
+    runs = df[df["type"] == "Run"].copy()
+    return runs
+
+
 def main():
     token = get_access_token()
     activities = fetch_all_activities(token)

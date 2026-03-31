@@ -289,15 +289,42 @@ PLOTLY_TEMPLATE = dict(
     )
 )
 
-# --- Data laden ---
+# --- Data laden (live van Strava API, met fallback naar CSV) ---
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 RUNS_CSV = os.path.join(DATA_DIR, "runs.csv")
 
-if not os.path.exists(RUNS_CSV):
-    st.error("Geen data gevonden. Draai eerst `python fetch_data.py` om je Strava data op te halen.")
-    st.stop()
 
-df = load_runs()
+@st.cache_data(ttl=900, show_spinner="Strava data ophalen...")
+def _fetch_live():
+    """Haal runs live op van Strava (gecached voor 15 min)."""
+    from fetch_data import fetch_runs_live
+    return fetch_runs_live(), pd.Timestamp.now()
+
+
+def load_data():
+    """Laad data: probeer live, anders CSV fallback."""
+    try:
+        df, fetched_at = _fetch_live()
+        if not df.empty:
+            # Voeg helper-kolommen toe (zelfde als analyze.load_runs)
+            df["start_date_local"] = pd.to_datetime(df["start_date_local"])
+            df["week"] = df["start_date_local"].dt.isocalendar().week.astype(int)
+            df["month"] = df["start_date_local"].dt.to_period("M")
+            df["year"] = df["start_date_local"].dt.year
+            df["day_of_week"] = df["start_date_local"].dt.day_name()
+            df["date"] = df["start_date_local"].dt.date
+            return df, fetched_at
+    except Exception as e:
+        st.toast(f"Live fetch mislukt: {e}. CSV fallback wordt gebruikt.", icon="⚠️")
+
+    # Fallback naar CSV
+    if not os.path.exists(RUNS_CSV):
+        st.error("Geen data gevonden. Draai eerst `python fetch_data.py`.")
+        st.stop()
+    return load_runs(), None
+
+
+df, _fetched_at = load_data()
 
 # --- Sidebar ---
 with st.sidebar:
@@ -309,6 +336,18 @@ with st.sidebar:
 
     run_types = df["sport_type"].unique() if "sport_type" in df.columns else ["Run"]
     selected_types = st.multiselect("🏃 Type", run_types, default=run_types)
+
+    st.markdown("---")
+
+    # Refresh knop + status
+    if st.button("🔄 Data verversen", use_container_width=True):
+        _fetch_live.clear()
+        st.rerun()
+
+    if _fetched_at:
+        st.caption(f"Live data · {_fetched_at.strftime('%d-%m %H:%M')}")
+    else:
+        st.caption("Offline modus (CSV)")
 
     st.markdown("---")
     st.markdown(
